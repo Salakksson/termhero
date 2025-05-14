@@ -9,13 +9,15 @@
 #include <signal.h>
 #include <stdbool.h>
 #include <string.h>
+#include <termios.h>
 
 #include "draw.h"
+#include "game.h"
 
 #define TARGET_FPS 200
 #define TARGET_FRAME_TIME (1.0 / TARGET_FPS)
 
-#define MAX_BYTES_PER_PIXEL 23 // estimated 21 but add 2 just to be sure
+#define MAX_BYTES_PER_PIXEL 26 // estimated 21 but add 2 just to be sure
 #define MAX_BYTES_PER_EOL 1
 #define BYTES_PER_BEGIN_END (3 + 4 + 1)
 
@@ -51,8 +53,25 @@ bool has_terminal_resized(coord* old_sz)
 	return true;
 }
 
+static struct termios original;
+
+void enable_noncanonical()
+{
+	struct termios t;
+	tcgetattr(STDIN_FILENO, &original);
+	t = original;
+	t.c_lflag &= ~(ICANON | ECHO);
+	tcsetattr(STDIN_FILENO, TCSANOW, &t);
+}
+
+void disable_noncanonical()
+{
+	tcsetattr(STDIN_FILENO, TCSANOW, &original);
+}
+
 void bye()
 {
+	disable_noncanonical();
 	printf("\x1b[?1049l");
 	printf("\x1b[?25h");
 }
@@ -124,6 +143,7 @@ int main()
 	setvbuf(stdout, NULL, _IONBF, 0);
 	printf("\x1b[?1049h");
 	printf("\x1b[?25l");
+	enable_noncanonical();
 	atexit(bye);
 	signal(SIGINT, sigint_handler);
 	int quit = 0;
@@ -131,6 +151,7 @@ int main()
 
 	gl_buffers buffers = {0};
 	coord window_sz = {0};
+	init_game();
 	while (!quit)
 	{
 		if (has_terminal_resized(&window_sz))
@@ -140,14 +161,20 @@ int main()
 		checkFramebuffer();
 
 		glViewport(0, 0, window_sz.x, window_sz.y);
-		glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+		glClearColor(
+			(float)0x19/0x100, (float)0x1b/0x100, (float)0x26/0x100, 1.0f // kitty fucks me over if its 1a1b26
+		);
 		glClear(GL_COLOR_BUFFER_BIT);
 
-		draw_main();
+		/* draw_main(); */
+		game_loop();
 
 		glReadPixels(0, 0, window_sz.x, window_sz.y, GL_RGB, GL_UNSIGNED_BYTE, buffers.pixels);
 		char* print_ptr = buffers.output;
 		print_ptr += sprintf(print_ptr, "\x1b[H");
+
+		color ppu = {0};
+		color ppl = {0};
 		for (int y = window_sz.y - 2; y >=0; y-= 2)
 		{
 			for (int x = 0; x < window_sz.x; x++)
@@ -156,7 +183,11 @@ int main()
 				int index_lower = x + window_sz.x * (y + 0);
 				color pu = buffers.pixels[index_upper];
 				color pl = buffers.pixels[index_lower];
-				print_ptr += sprintf(print_ptr, "\x1b[38;2;%d;%d;%dm\x1b[48;2;%d;%d;%dm▀", pu.r, pu.g, pu.b, pl.r, pl.g, pl.b);
+				if (!compare_color(ppu, pu))
+					print_ptr += sprintf(print_ptr, "\x1b[38;2;%d;%d;%dm", pu.r, pu.g, pu.b);
+				if (!compare_color(ppl, pl))
+					print_ptr += sprintf(print_ptr, "\x1b[48;2;%d;%d;%dm", pl.r, pl.g, pl.b);
+				print_ptr += sprintf(print_ptr, "▀");
 			}
 			print_ptr += sprintf(print_ptr, "\n");
 		}
@@ -168,6 +199,7 @@ int main()
 			usleep(1e6 * (TARGET_FRAME_TIME - frame_time));
 		}
 		printf("fps: %.2f\n", 1 / (get_time() - prev_frame));
+		printf("size: %ix%i", window_sz.x, window_sz.y);
 		prev_frame = get_time();
 	}
 

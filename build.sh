@@ -2,8 +2,10 @@
 
 set -xe
 
+TARGET="./termhero"
+
 LDFLAGS="-lGL -lglfw -lGLEW -lm"
 
-gcc $LDFLAGS -g2 -Og src/*.c -o gterm
+gcc $LDFLAGS -O3 src/*.c -o $TARGET
 
-./gterm
+$TARGET

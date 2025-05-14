@@ -5,9 +5,12 @@
 
 double get_time()
 {
+	static double init_time = 0;
 	struct timespec ts;
 	clock_gettime(CLOCK_MONOTONIC, &ts);
-	return (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
+	double time = (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
+	if (init_time == 0) init_time = time;
+	return time - init_time;
 }
 
 color hsv_to_rgb(unsigned char h, unsigned char s, unsigned char v)
